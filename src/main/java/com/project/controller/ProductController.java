@@ -132,6 +132,71 @@ public class ProductController {
         return new ResponseEntity<>(product, HttpStatus.OK);
     }
 
+
+    @PutMapping("/test-deadlock/{productId}/{productId2}")
+    public ResponseEntity<?> testDeadLock(@PathVariable("productId") Integer productId, @PathVariable("productId2") Integer productId2) {
+        Transaction transaction = new Transaction();
+        transactionService.saveTransaction(transaction);
+        Lock lock = new Lock(LockType.WRITE, productId,"product", transaction);
+        while (lockService.isLocked("product", productId, transaction)) {
+            try {
+                Lock otherLock = lockService.findLockByTableAndObjectId("product", productId2);
+                if(otherLock != null) {
+                    WaitFor waitFor2 = new WaitFor(lock.getLockType(), lock.getTableName(), lock.getObjectId(), otherLock.getTransaction().getId(), transaction.getId());
+                    if (waitForService.findByTransactionHasLockId(transaction.getId()) == null) {
+                        waitForService.saveWaitFor(waitFor2);
+                    }
+                    WaitFor waitForCycle = waitForService.findByTransactionWaitsForLockId(otherLock.getTransaction().getId());
+                    if(waitForCycle != null && Objects.equals(waitForCycle.getLockTable(), waitFor2.getLockTable()) && Objects.equals(waitForCycle.getTransactionHasLockId(), transaction.getId()) && Objects.equals(waitForCycle.getLockObjectId(), productId)) {
+                        waitForService.deleteWaitFor(waitFor2);
+                        lockService.deleteAllByTransaction(transaction);
+                        System.out.println("Deadlock detected");
+                        return new ResponseEntity<>(HttpStatus.CONFLICT);
+                    }
+                }
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+                return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
+            }
+        }
+        lockService.saveLock(lock);
+        Product product1 = productService.findProductById(productId).get();
+        product1.setStock(product1.getStock() + 1);
+        productService.saveProduct(product1);
+
+        Lock lock2 = new Lock(LockType.WRITE, productId2,"product", transaction);
+        while (lockService.isLocked("product", productId2, transaction)) {
+            try {
+                Lock otherLock = lockService.findLockByTableAndObjectId("product", productId2);
+                if(otherLock != null) {
+                    WaitFor waitFor = new WaitFor(lock2.getLockType(), lock2.getTableName(), lock2.getObjectId(), otherLock.getTransaction().getId(), transaction.getId());
+                    if (waitForService.findByTransactionHasLockId(transaction.getId()) == null) {
+                        waitForService.saveWaitFor(waitFor);
+                    }
+                    WaitFor waitForCycle = waitForService.findByTransactionWaitsForLockId(otherLock.getTransaction().getId());
+                    if(waitForCycle != null && Objects.equals(waitForCycle.getLockTable(), waitFor.getLockTable()) && Objects.equals(waitForCycle.getTransactionHasLockId(), transaction.getId()) && Objects.equals(waitForCycle.getLockObjectId(), productId)) {
+                        waitForService.deleteWaitFor(waitFor);
+                        lockService.deleteAllByTransaction(transaction);
+                        System.out.println("Deadlock detected");
+                        return new ResponseEntity<>(HttpStatus.CONFLICT);
+                    }
+                }
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+                return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
+            }
+        }
+        lockService.saveLock(lock2);
+        Product product2 = productService.findProductById(productId).get();
+        product1.setStock(product2.getStock() + 1);
+        productService.saveProduct(product2);
+
+        lockService.deleteAllByTransaction(transaction);
+        return new ResponseEntity<>(HttpStatus.OK);
+    }
+
     @PutMapping("/{productId}")
     public ResponseEntity<?> updateProduct(@PathVariable("productId") Integer productId, @RequestBody ProductDTO productDTO) {
         Transaction transaction = new Transaction();
@@ -144,7 +209,7 @@ public class ProductController {
                     WaitFor waitFor = new WaitFor(otherLock.getLockType(), otherLock.getTableName(), otherLock.getObjectId(), otherLock.getTransaction().getId(), transaction.getId());
                     waitForService.saveWaitFor(waitFor);
                     WaitFor waitForCycle = waitForService.findByTransactionWaitsForLockId(otherLock.getTransaction().getId());
-                    if(waitForCycle != null && Objects.equals(waitForCycle.getTransactionHasLockId(), transaction.getId()) ) {
+                    if(waitForCycle != null && Objects.equals(waitForCycle.getLockTable(), "product") && Objects.equals(waitForCycle.getTransactionHasLockId(), transaction.getId()) && Objects.equals(waitForCycle.getLockObjectId(), productId)) {
                         waitForService.deleteWaitFor(waitFor);
                         System.out.println("Deadlock detected");
                         return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
