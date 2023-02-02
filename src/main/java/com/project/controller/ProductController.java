@@ -3,6 +3,7 @@ package com.project.controller;
 
 import com.project.model.mgmt.Lock;
 import com.project.model.mgmt.Transaction;
+import com.project.model.mgmt.WaitFor;
 import com.project.model.mgmt.enums.LockType;
 import com.project.model.mgmt.enums.TransactionStatus;
 import com.project.model.store.Category;
@@ -11,6 +12,7 @@ import com.project.model.store.dto.ProductDTO;
 import com.project.service.mgmt.LockService;
 import com.project.service.mgmt.OperationService;
 import com.project.service.mgmt.TransactionService;
+import com.project.service.mgmt.WaitForService;
 import com.project.service.store.CategoryService;
 import com.project.service.store.OrderDetailsService;
 import com.project.service.store.ProductService;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 @CrossOrigin(origins = "*")
@@ -42,6 +45,9 @@ public class ProductController {
 
     @Autowired
     private OperationService operationService;
+
+    @Autowired
+    private WaitForService waitForService;
 
     @Autowired
     private LockService lockService;
@@ -131,11 +137,21 @@ public class ProductController {
         Transaction transaction = new Transaction();
         transactionService.saveTransaction(transaction);
         Lock lock = new Lock(LockType.WRITE, productId,"product", transaction);
-        while (lockService.isLocked("product", productId)) {
+        while (lockService.isLocked("product", productId, transaction)) {
             try {
                 Lock otherLock = lockService.findLockByTableAndObjectId("product", productId);
-                System.out.println("Other lock" + otherLock.getTableName());
-                Thread.sleep(1000);
+                if(otherLock != null) {
+                    WaitFor waitFor = new WaitFor(otherLock.getLockType(), otherLock.getTableName(), otherLock.getObjectId(), otherLock.getTransaction().getId(), transaction.getId());
+                    waitForService.saveWaitFor(waitFor);
+                    WaitFor waitForCycle = waitForService.findByTransactionWaitsForLockId(otherLock.getTransaction().getId());
+                    if(waitForCycle != null && Objects.equals(waitForCycle.getTransactionHasLockId(), transaction.getId()) ) {
+                        waitForService.deleteWaitFor(waitFor);
+                        System.out.println("Deadlock detected");
+                        return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
+                    }
+                }
+
+                Thread.sleep(1500);
             } catch (InterruptedException e) {
                 e.printStackTrace();
                 return new ResponseEntity<>(HttpStatus.INTERNAL_SERVER_ERROR);
@@ -166,7 +182,7 @@ public class ProductController {
         Transaction transaction = new Transaction();
         transactionService.saveTransaction(transaction);
         Lock lock = new Lock(LockType.WRITE, productId,"product", transaction);
-        while (lockService.isLocked("product", productId)) {
+        while (lockService.isLocked("product", productId, transaction)) {
             try {
                 Lock otherLock = lockService.findLockByTableAndObjectId("product", productId);
                 Thread.sleep(1000);

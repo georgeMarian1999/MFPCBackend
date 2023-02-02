@@ -109,29 +109,86 @@ public class OrderController {
 
     @PostMapping("/placeOrder/{userId}")
     public ResponseEntity<?> placeOrder(@PathVariable("userId") Integer userId, @RequestBody OrderDTO orderDTO) {
+        Transaction transaction = new Transaction();
+        transactionService.saveTransaction(transaction);
+
+        Lock lock = new Lock(LockType.READ, userId, "user", transaction);
+        while (lockService.isLocked("user", userId, transaction)){
+            try {
+                Lock otherLock = lockService.findLockByTableAndObjectId("user", userId);
+                if (otherLock.getLockType() == LockType.WRITE) {
+
+                }
+                Thread.sleep(1000);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+        }
+        lockService.saveLock(lock);
         Optional<User> user = userService.findUserById(userId);
         List<ProductOrderDTO> productOrderDTOList = orderDTO.getProductOrderDTOList();
+
+
         double subtotal = 0;
         int shipping = 0;
         double taxes = 0;
         double total = 0;
         for (ProductOrderDTO p : productOrderDTOList) {
+            Lock productLock = new Lock(LockType.WRITE, p.getId(), "product", transaction);
+            while (lockService.isLocked("product", p.getId(), transaction)){
+                try {
+                    Lock otherLock = lockService.findLockByTableAndObjectId("product", p.getId());
+                    if (otherLock.getLockType() == LockType.WRITE) {
+
+                    }
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            lockService.saveLock(productLock);
+
             Optional<Product> product = productService.findProductById(p.getId());
             int stock = product.get().getStock() - p.getQuantity();
             subtotal = subtotal + calcSubtotal(product.get(), p.getQuantity());
             product.get().setStock(stock);
             productService.saveProduct(product.get());
+
         }
         shipping = calcShipping(subtotal);
         taxes = calcTaxes(subtotal);
         total = calcTotal(subtotal, taxes, shipping);
         Order order = new Order(user.get(), orderDTO.getPhone(), orderDTO.getStreet(), orderDTO.getApartment(), orderDTO.getCity(), orderDTO.getCounty(), orderDTO.getPostcode(), (float) subtotal, (float) taxes, (float) total, OrderStatus.PROCESSING, LocalDate.now(), (float) shipping);
+        Lock orderLock = new Lock(LockType.WRITE, order.getId(), "order", transaction);
+        lockService.saveLock(orderLock);
         orderService.saveOrder(order);
         for (ProductOrderDTO p : productOrderDTOList) {
+            Lock productLock = new Lock(LockType.READ, p.getId(), "product", transaction);
+            while (lockService.isLocked("product", p.getId(), transaction)){
+                try {
+                    Lock otherLock = lockService.findLockByTableAndObjectId("product", p.getId());
+                    if (otherLock.getLockType() == LockType.WRITE) {
+
+                    }
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+            lockService.saveLock(productLock);
             Optional<Product> product = productService.findProductById(p.getId());
             OrderDetail orderDetail = new OrderDetail(order, product.get(), p.getQuantity());
+
+            Lock orderDetailLock = new Lock(LockType.WRITE, orderDetail.getId(), "orderDetail", transaction);
+            lockService.saveLock(orderDetailLock);
+
             orderService.saveOrderDetail(orderDetail);
         }
+        System.out.println("Transaction: " + transaction.getId() + " - " + transaction.getStatus());
+
+        transaction.setStatus(TransactionStatus.COMMIT);
+        transactionService.saveTransaction(transaction);
+        lockService.deleteAllByTransaction(transaction);
 
         return new ResponseEntity<>(HttpStatus.OK);
     }
@@ -160,7 +217,7 @@ public class OrderController {
         transactionService.saveTransaction(transaction);
         Lock lock = new Lock(LockType.WRITE, orderId,"order", transaction);
 
-        while (lockService.isLocked("order", orderId)){
+        while (lockService.isLocked("order", orderId, transaction)){
             try {
                 Lock otherLock = lockService.findLockByTableAndObjectId("order", orderId);
                 Thread.sleep(1000);
@@ -186,7 +243,7 @@ public class OrderController {
         transactionService.saveTransaction(transaction);
         Lock orderLock = new Lock(LockType.WRITE, orderId,"order", transaction);
 
-        while (lockService.isLocked("order", orderId)){
+        while (lockService.isLocked("order", orderId, transaction)){
             try {
                 Lock otherLock = lockService.findLockByTableAndObjectId("order", orderId);
                 Thread.sleep(1000);
@@ -204,7 +261,7 @@ public class OrderController {
 
         for (OrderDetail ordDetail : ordersDetails) {
             Lock orderDetailLock = new Lock(LockType.READ, ordDetail.getId(),"orderDetail", transaction);
-            while (lockService.isLocked("orderDetail",ordDetail.getId())){
+            while (lockService.isLocked("orderDetail",ordDetail.getId(), transaction)){
                 try {
                     Lock otherOrderDetailLock = lockService.findLockByTableAndObjectId("orderDetail", ordDetail.getId());
                     Thread.sleep(1000);
@@ -217,7 +274,7 @@ public class OrderController {
             List<Product> products = productService.findAllProductsByOrderDetails(ordDetail);
             for (Product p : products){
                 Lock productLock = new Lock(LockType.WRITE, p.getId(),"product", transaction);
-                while (lockService.isLocked("product",p.getId() )){
+                while (lockService.isLocked("product",p.getId(), transaction )){
                     try {
                         Lock otherOrderDetailLock = lockService.findLockByTableAndObjectId("product", p.getId());
                         Thread.sleep(1000);

@@ -31,8 +31,9 @@ public class LockService {
         return lockRepository.findByTransaction(transaction);
     }
 
-    public boolean isLocked(String table, Integer objectId) {
-        return lockRepository.existsByLockTypeAndTableNameAndObjectId(LockType.WRITE, table, objectId);
+    public boolean isLocked(String table, Integer objectId, Transaction transaction) {
+        int numberOfOtherLocks = lockRepository.findAllByTransactionNot(transaction).size();
+        return numberOfOtherLocks != 0;
     }
 
     public void saveLock(Lock lock) {

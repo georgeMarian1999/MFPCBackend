@@ -18,6 +18,8 @@ public interface LockRepository extends JpaRepository<Lock, Integer>, CrudReposi
 
     List<Lock> findAllByTransaction(Transaction transaction);
 
+    List<Lock> findAllByTransactionNot(Transaction transaction);
+
     public boolean existsByLockTypeAndTableNameAndObjectId(LockType lockType, String table, Integer objectId);
 
     void deleteAllByTransactionId(Integer transactionId);
