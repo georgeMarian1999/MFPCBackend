@@ -163,7 +163,7 @@ public class ProductController {
         lockService.saveLock(lock);
         Product product1 = productService.findProductById(productId).get();
         product1.setStock(product1.getStock() + 1);
-        productService.saveProduct(product1);
+
 
         Lock lock2 = new Lock(LockType.WRITE, productId2,"product", transaction);
         while (lockService.isLocked("product", productId2, transaction)) {
@@ -190,10 +190,12 @@ public class ProductController {
         }
         lockService.saveLock(lock2);
         Product product2 = productService.findProductById(productId).get();
-        product1.setStock(product2.getStock() + 1);
-        productService.saveProduct(product2);
+        product2.setStock(product2.getStock() + 1);
+
 
         lockService.deleteAllByTransaction(transaction);
+        productService.saveProduct(product1);
+        productService.saveProduct(product2);
         return new ResponseEntity<>(HttpStatus.OK);
     }
 
